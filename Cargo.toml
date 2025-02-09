@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/hmath",
+    "crates/hecs",
+    "crates/hrenderer",
+    "crates/hengine",
+    "crates/hgame",
+    "crates/happ"
+]
+
