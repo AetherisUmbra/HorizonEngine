@@ -1,9 +1,7 @@
 [package]
-name = "hengine"
+name = "hcore"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 anyhow = "1.0.95"
-hrenderer = { path = "../hrenderer" }
-winit = "0.30.9"

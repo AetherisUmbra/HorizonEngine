@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 env_logger = "0.11.6"
 winit = "0.30.9"
-hrenderer = { path = "../hrenderer" }
+anyhow = "1.0.95"
+hengine = { path = "../hengine" }

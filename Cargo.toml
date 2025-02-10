@@ -5,6 +5,6 @@ members = [
     "crates/hrenderer",
     "crates/hengine",
     "crates/hgame",
-    "crates/happ"
+    "crates/happ",
+    "crates/hcore",
 ]
-
