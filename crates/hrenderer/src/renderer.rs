@@ -1,6 +1,8 @@
 use crate::render_context::RenderContext;
 use crate::vertex::Vertex;
 use anyhow::Result;
+use std::fs::File;
+use std::io::Read;
 use std::sync::Arc;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
@@ -28,6 +30,8 @@ use vulkano::pipeline::{
     DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo,
 };
 use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp};
+use vulkano::shader::spirv::bytes_to_words;
+use vulkano::shader::{ShaderModule, ShaderModuleCreateInfo};
 use vulkano::swapchain::{
     acquire_next_image, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
 };
@@ -45,6 +49,34 @@ pub struct Renderer {
     render_context: Option<RenderContext>,
 }
 
+fn load_shader(device: Arc<Device>, name: &str) -> Arc<ShaderModule> {
+    let path = format!("res/shaders/{}.spv", name);
+    let mut file = match File::open(&path) {
+        Ok(file) => file,
+        Err(err) => {
+            eprintln!("Failed to open SPIR-V file {}: {}", path, err);
+            panic!("Failed to open SPIR-V file");
+        }
+    };
+
+    let mut buffer = Vec::new();
+    if let Err(err) = file.read_to_end(&mut buffer) {
+        eprintln!("Failed to read SPIR-V file {}: {}", path, err);
+        panic!("Failed to read SPIR-V file");
+    }
+
+    let words = match bytes_to_words(&buffer) {
+        Ok(words) => words,
+        Err(err) => {
+            eprintln!("Failed to convert bytes to words for {}: {}", path, err);
+            panic!("Failed to convert bytes to words");
+        }
+    };
+
+    let create_info = ShaderModuleCreateInfo::new(&words);
+    unsafe { ShaderModule::new(device, create_info).expect("Failed to create shader module") }
+}
+
 impl Renderer {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
         let library = VulkanLibrary::new()?;
@@ -56,6 +88,7 @@ impl Renderer {
             InstanceCreateInfo {
                 flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
                 enabled_extensions: required_extensions,
+                enabled_layers: vec!["VK_LAYER_KHRONOS_validation".into()],
                 ..Default::default()
             },
         )?;
@@ -178,11 +211,19 @@ impl Renderer {
                 .physical_device()
                 .surface_capabilities(&surface, Default::default())?;
 
-            let (image_format, _) = self
+            let formats = self
                 .device
                 .physical_device()
-                .surface_formats(&surface, Default::default())?[0]; //TODO -> Take HDR format
+                .surface_formats(&surface, Default::default())?;
 
+            let image_format = formats.iter().find(|(format, _)| {
+                matches!(
+                format,
+                vulkano::format::Format::R16G16B16A16_SFLOAT | vulkano::format::Format::A2B10G10R10_UNORM_PACK32
+            )
+            }).map(|(format, _)| *format)
+                .unwrap_or(formats[0].0);
+            
             Swapchain::new(
                 self.device.clone(),
                 surface,
@@ -203,56 +244,24 @@ impl Renderer {
 
         let attachment_image_views = window_size_dependent_setup(&images);
 
-        mod vs {
-            vulkano_shaders::shader! {
-                ty: "vertex",
-                src: r"
-                    #version 450
-
-                    layout(location = 0) in vec2 position;
-                    layout(location = 1) in vec3 color;
-                    
-                    layout(location = 0) out vec3 frag_color;
-
-                    void main() {
-                        gl_Position = vec4(position, 0.0, 1.0);
-                        frag_color = color;
-                    }
-                ",
-            }
-        }
-
-        mod fs {
-            vulkano_shaders::shader! {
-                ty: "fragment",
-                src: r"
-                    #version 450
-
-                    layout(location = 0) in vec3 frag_color;
-                    layout(location = 0) out vec4 f_color;
-
-                    void main() {
-                        f_color = vec4(frag_color, 1.0);
-                    }
-                ",
-            }
-        }
+        let vs = load_shader(self.device.clone(), "shader.vert");
+        let fs = load_shader(self.device.clone(), "shader.frag");
 
         let pipeline = {
-            let vs = vs::load(self.device.clone())
-                .unwrap()
-                .entry_point("main")
-                .unwrap();
-            let fs = fs::load(self.device.clone())
-                .unwrap()
-                .entry_point("main")
-                .unwrap();
+            let vs_entry_point = vs.entry_point("main").unwrap();
+            let fs_entry_point = fs.entry_point("main").unwrap();
 
-            let vertex_input_state = Vertex::per_vertex().definition(&vs)?;
+            let vertex_input_state = match Vertex::per_vertex().definition(&vs_entry_point) {
+                Ok(state) => state,
+                Err(e) => {
+                    eprintln!("Pipeline vertex input state creation failed: {:?}", e);
+                    panic!("Pipeline vertex input state failed!");
+                }
+            };
 
             let stages = [
-                PipelineShaderStageCreateInfo::new(vs),
-                PipelineShaderStageCreateInfo::new(fs),
+                PipelineShaderStageCreateInfo::new(vs_entry_point),
+                PipelineShaderStageCreateInfo::new(fs_entry_point),
             ];
 
             let layout = PipelineLayout::new(
