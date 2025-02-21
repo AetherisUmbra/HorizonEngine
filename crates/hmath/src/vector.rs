@@ -1,12 +1,16 @@
-use std::ops::{Add, Div, Mul, Sub};
 use num_traits::Float;
+use std::ops::{Add, Div, Mul, Sub};
 
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Vector3<T> {
     pub x: T,
     pub y: T,
     pub z: T,
 }
+
+pub type Vector3d = Vector3<f64>;
+pub type Vector3f = Vector3<f32>;
 
 impl<T> Vector3<T>
 where

@@ -1,3 +1,3 @@
-mod matrix;
-mod quaternion;
-mod vector;
+pub mod matrix;
+pub mod quaternion;
+pub mod vector;

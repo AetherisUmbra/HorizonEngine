@@ -39,6 +39,8 @@ impl ApplicationHandler for Application {
                 .renderer()
                 .create_render_context(Arc::clone(window));
         }
+
+        self.engine.initialize();
     }
 
     fn window_event(

@@ -13,6 +13,7 @@ pub struct RenderContext {
     pub viewport: Viewport,
     pub recreate_swapchain: bool,
     pub previous_frame_end: Option<Box<dyn GpuFuture>>,
+    pub(crate) depth_buffer: Arc<ImageView>,
 }
 
 impl RenderContext {}

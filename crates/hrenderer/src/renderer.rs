@@ -1,6 +1,8 @@
 use crate::render_context::RenderContext;
 use crate::vertex::Vertex;
 use anyhow::Result;
+use hmath::matrix::Matrix4x4;
+use hmath::vector::Vector3;
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
@@ -13,11 +15,13 @@ use vulkano::device::physical::PhysicalDeviceType;
 use vulkano::device::{
     Device, DeviceCreateInfo, DeviceExtensions, DeviceFeatures, Queue, QueueCreateInfo, QueueFlags,
 };
+use vulkano::format::Format;
 use vulkano::image::view::ImageView;
-use vulkano::image::{Image, ImageUsage};
+use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorBlendState};
+use vulkano::pipeline::graphics::depth_stencil::DepthStencilState;
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
 use vulkano::pipeline::graphics::multisample::MultisampleState;
 use vulkano::pipeline::graphics::rasterization::RasterizationState;
@@ -45,7 +49,9 @@ pub struct Renderer {
     device: Arc<Device>,
     queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    memory_allocator: Arc<StandardMemoryAllocator>,
     vertex_buffer: Subbuffer<[Vertex]>,
+    index_buffer: Subbuffer<[u16]>,
     render_context: Option<RenderContext>,
 }
 
@@ -163,22 +169,53 @@ impl Renderer {
         ));
 
         let vertices = [
+            // Front face
             Vertex {
-                position: [-0.5, 0.5],
-                color: [1.0, 0.0, 0.0],
+                position: Vector3::new(-0.5, -0.5, 0.5),
+                color: Vector3::new(1.0, 0.0, 0.0),
             },
             Vertex {
-                position: [0.5, 0.5],
-                color: [0.0, 1.0, 0.0],
+                position: Vector3::new(0.5, -0.5, 0.5),
+                color: Vector3::new(0.0, 1.0, 0.0),
             },
             Vertex {
-                position: [0.0, -0.5],
-                color: [0.0, 0.0, 1.0],
+                position: Vector3::new(0.5, 0.5, 0.5),
+                color: Vector3::new(0.0, 0.0, 1.0),
+            },
+            Vertex {
+                position: Vector3::new(-0.5, 0.5, 0.5),
+                color: Vector3::new(1.0, 1.0, 0.0),
+            },
+            // Back face
+            Vertex {
+                position: Vector3::new(-0.5, -0.5, -0.5),
+                color: Vector3::new(1.0, 0.0, 1.0),
+            },
+            Vertex {
+                position: Vector3::new(0.5, -0.5, -0.5),
+                color: Vector3::new(0.0, 1.0, 1.0),
+            },
+            Vertex {
+                position: Vector3::new(0.5, 0.5, -0.5),
+                color: Vector3::new(1.0, 1.0, 1.0),
+            },
+            Vertex {
+                position: Vector3::new(-0.5, 0.5, -0.5),
+                color: Vector3::new(0.0, 0.0, 0.0),
             },
         ];
 
+        let indices = [
+            0, 1, 2, 2, 3, 0, // Front face
+            4, 5, 6, 6, 7, 4, // Back face
+            0, 1, 5, 5, 4, 0, // Bottom face
+            2, 3, 7, 7, 6, 2, // Top face
+            0, 3, 7, 7, 4, 0, // Left face
+            1, 2, 6, 6, 5, 1, // Right face
+        ];
+
         let vertex_buffer = Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::VERTEX_BUFFER,
                 ..Default::default()
@@ -191,12 +228,28 @@ impl Renderer {
             vertices,
         )?;
 
+        let index_buffer = Buffer::from_iter(
+            memory_allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::INDEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            indices,
+        )?;
+
         Ok(Renderer {
             instance,
             device,
             queue,
             command_buffer_allocator,
+            memory_allocator,
             vertex_buffer,
+            index_buffer,
             render_context: None,
         })
     }
@@ -216,14 +269,18 @@ impl Renderer {
                 .physical_device()
                 .surface_formats(&surface, Default::default())?;
 
-            let image_format = formats.iter().find(|(format, _)| {
-                matches!(
-                format,
-                vulkano::format::Format::R16G16B16A16_SFLOAT | vulkano::format::Format::A2B10G10R10_UNORM_PACK32
-            )
-            }).map(|(format, _)| *format)
+            let image_format = formats
+                .iter()
+                .find(|(format, _)| {
+                    matches!(
+                        format,
+                        vulkano::format::Format::R16G16B16A16_SFLOAT
+                            | vulkano::format::Format::A2B10G10R10_UNORM_PACK32
+                    )
+                })
+                .map(|(format, _)| *format)
                 .unwrap_or(formats[0].0);
-            
+
             Swapchain::new(
                 self.device.clone(),
                 surface,
@@ -246,6 +303,21 @@ impl Renderer {
 
         let vs = load_shader(self.device.clone(), "shader.vert");
         let fs = load_shader(self.device.clone(), "shader.frag");
+
+        let depth_buffer = ImageView::new_default(
+            Image::new(
+                self.memory_allocator.clone(),
+                ImageCreateInfo {
+                    image_type: ImageType::Dim2d,
+                    format: Format::D16_UNORM,
+                    extent: images[0].extent(),
+                    usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::TRANSIENT_ATTACHMENT,
+                    ..Default::default()
+                },
+                AllocationCreateInfo::default(),
+            )
+            .unwrap(),
+        )?;
 
         let pipeline = {
             let vs_entry_point = vs.entry_point("main").unwrap();
@@ -272,6 +344,7 @@ impl Renderer {
 
             let subpass = PipelineRenderingCreateInfo {
                 color_attachment_formats: vec![Some(swapchain.image_format())],
+                depth_attachment_format: Some(Format::D16_UNORM),
                 ..Default::default()
             };
 
@@ -285,6 +358,7 @@ impl Renderer {
                     viewport_state: Some(ViewportState::default()),
                     rasterization_state: Some(RasterizationState::default()),
                     multisample_state: Some(MultisampleState::default()),
+                    depth_stencil_state: Some(DepthStencilState::default()),
                     color_blend_state: Some(ColorBlendState::with_attachment_states(
                         subpass.color_attachment_formats.len() as u32,
                         ColorBlendAttachmentState::default(),
@@ -313,6 +387,7 @@ impl Renderer {
             viewport,
             recreate_swapchain,
             previous_frame_end,
+            depth_buffer,
         });
         Ok(())
     }
@@ -390,6 +465,12 @@ impl Renderer {
                         render_context.attachment_image_views[image_index as usize].clone(),
                     )
                 })],
+                depth_attachment: Some(RenderingAttachmentInfo {
+                    load_op: AttachmentLoadOp::Clear,
+                    store_op: AttachmentStoreOp::DontCare,
+                    clear_value: Some([0.0, 0.0, 0.0, 1.0].into()),
+                    ..RenderingAttachmentInfo::image_view(render_context.depth_buffer.clone())
+                }),
                 ..Default::default()
             })
             .unwrap()
@@ -398,9 +479,11 @@ impl Renderer {
             .bind_pipeline_graphics(render_context.pipeline.clone())
             .unwrap()
             .bind_vertex_buffers(0, self.vertex_buffer.clone())
+            .unwrap()
+            .bind_index_buffer(self.index_buffer.clone())
             .unwrap();
 
-        unsafe { builder.draw(self.vertex_buffer.len() as u32, 1, 0, 0) }.unwrap();
+        unsafe { builder.draw_indexed(self.index_buffer.len() as u32, 1, 0, 0, 0) }.unwrap();
 
         builder.end_rendering().unwrap();
 
@@ -436,6 +519,10 @@ impl Renderer {
             }
         }
     }
+
+    pub fn set_projection_matrix(&self, p0: &Matrix4x4) {}
+
+    pub fn set_view_matrix(&self, v0: &Matrix4x4) {}
 }
 
 fn window_size_dependent_setup(images: &[Arc<Image>]) -> Vec<Arc<ImageView>> {

@@ -7,3 +7,5 @@ edition = "2021"
 anyhow = "1.0.95"
 hrenderer = { path = "../hrenderer" }
 winit = "0.30.9"
+hmath = { path = "../hmath" }
+hecs = { path = "../hecs" }

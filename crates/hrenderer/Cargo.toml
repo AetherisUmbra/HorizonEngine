@@ -9,3 +9,4 @@ vulkano = "0.35.1"
 vulkano-shaders = "0.35.0"
 anyhow = "1.0.95"
 winit = "0.30.9"
+hmath = { path = "../hmath" }
