@@ -28,7 +28,7 @@ use vulkano::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorB
 use vulkano::pipeline::graphics::depth_stencil::DepthStencilState;
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
 use vulkano::pipeline::graphics::multisample::MultisampleState;
-use vulkano::pipeline::graphics::rasterization::RasterizationState;
+use vulkano::pipeline::graphics::rasterization::{CullMode, RasterizationState};
 use vulkano::pipeline::graphics::subpass::PipelineRenderingCreateInfo;
 use vulkano::pipeline::graphics::vertex_input::{Vertex as VulkanoVertex, VertexDefinition};
 use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
@@ -183,48 +183,31 @@ impl Renderer {
 
         let vertices = [
             // Front face
-            Vertex {
-                position: Vector3::new(-0.5, -0.5, 0.5),
-                color: Vector3::new(1.0, 0.0, 0.0),
-            },
-            Vertex {
-                position: Vector3::new(0.5, -0.5, 0.5),
-                color: Vector3::new(0.0, 1.0, 0.0),
-            },
-            Vertex {
-                position: Vector3::new(0.5, 0.5, 0.5),
-                color: Vector3::new(0.0, 0.0, 1.0),
-            },
-            Vertex {
-                position: Vector3::new(-0.5, 0.5, 0.5),
-                color: Vector3::new(1.0, 1.0, 0.0),
-            },
+            Vertex { position: Vector3::new(-0.5, -0.5,  0.5), color: Vector3::new(1.0, 0.0, 0.0) }, // 0
+            Vertex { position: Vector3::new( 0.5, -0.5,  0.5), color: Vector3::new(1.0, 0.0, 0.0) }, // 1
+            Vertex { position: Vector3::new( 0.5,  0.5,  0.5), color: Vector3::new(1.0, 0.0, 0.0) }, // 2
+            Vertex { position: Vector3::new(-0.5,  0.5,  0.5), color: Vector3::new(1.0, 0.0, 0.0) }, // 3
+            
             // Back face
-            Vertex {
-                position: Vector3::new(-0.5, -0.5, -0.5),
-                color: Vector3::new(1.0, 0.0, 1.0),
-            },
-            Vertex {
-                position: Vector3::new(0.5, -0.5, -0.5),
-                color: Vector3::new(0.0, 1.0, 1.0),
-            },
-            Vertex {
-                position: Vector3::new(0.5, 0.5, -0.5),
-                color: Vector3::new(1.0, 1.0, 1.0),
-            },
-            Vertex {
-                position: Vector3::new(-0.5, 0.5, -0.5),
-                color: Vector3::new(0.0, 0.0, 0.0),
-            },
+            Vertex { position: Vector3::new(-0.5, -0.5, -0.5), color: Vector3::new(0.0, 1.0, 0.0) }, // 4
+            Vertex { position: Vector3::new( 0.5, -0.5, -0.5), color: Vector3::new(0.0, 1.0, 0.0) }, // 5
+            Vertex { position: Vector3::new( 0.5,  0.5, -0.5), color: Vector3::new(0.0, 1.0, 0.0) }, // 6
+            Vertex { position: Vector3::new(-0.5,  0.5, -0.5), color: Vector3::new(0.0, 1.0, 0.0) }, // 7
         ];
 
-        let indices = [
-            0, 1, 2, 2, 3, 0, // Front face
-            4, 5, 6, 6, 7, 4, // Back face
-            0, 1, 5, 5, 4, 0, // Bottom face
-            2, 3, 7, 7, 6, 2, // Top face
-            0, 3, 7, 7, 4, 0, // Left face
-            1, 2, 6, 6, 5, 1, // Right face
+        let indices: [u16; 36] = [
+            // Front face
+            0, 2, 1,  0, 3, 2,
+            // Back face
+            5, 7, 4,  5, 6, 7,
+            // Top face
+            3, 6, 2,  3, 7, 6,
+            // Bottom face
+            4, 1, 5,  4, 0, 1,
+            // Right face
+            1, 6, 5,  1, 2, 6,
+            // Left face
+            4, 3, 0,  4, 7, 3
         ];
 
         let vertex_buffer = Buffer::from_iter(
@@ -367,6 +350,11 @@ impl Renderer {
                 ..Default::default()
             };
 
+            let rasterization_state = RasterizationState {
+                cull_mode: CullMode::Back,
+                ..Default::default()
+            };
+
             GraphicsPipeline::new(
                 self.device.clone(),
                 None,
@@ -375,7 +363,7 @@ impl Renderer {
                     vertex_input_state: Some(vertex_input_state),
                     input_assembly_state: Some(InputAssemblyState::default()),
                     viewport_state: Some(ViewportState::default()),
-                    rasterization_state: Some(RasterizationState::default()),
+                    rasterization_state: Some(rasterization_state),
                     multisample_state: Some(MultisampleState::default()),
                     depth_stencil_state: Some(DepthStencilState::default()),
                     color_blend_state: Some(ColorBlendState::with_attachment_states(
@@ -437,7 +425,7 @@ impl Renderer {
             return;
         }
 
-        let mut render_context = if let Some(ref mut context) = self.render_context {
+        let render_context = if let Some(ref mut context) = self.render_context {
             context
         } else {
             return;

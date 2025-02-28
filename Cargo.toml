@@ -1,10 +1,3 @@
 [workspace]
-members = [
-    "crates/hmath",
-    "crates/hecs",
-    "crates/hrenderer",
-    "crates/hengine",
-    "crates/hgame",
-    "crates/happ",
-    "crates/hcore",
-]
+members = ["crates/*"]
+resolver = "2"

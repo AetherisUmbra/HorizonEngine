@@ -46,7 +46,7 @@ impl ApplicationHandler for Application {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        window_id: WindowId,
+        _window_id: WindowId,
         event: WindowEvent,
     ) {
         match event {
@@ -76,14 +76,14 @@ impl ApplicationHandler for Application {
         self.engine.handle_device_event(&event);
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         self.engine.update();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
     }
 
-    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         println!("Goodbye!");
     }
 }

@@ -1,6 +1,7 @@
 use crate::components::camera_component::CameraComponent;
 use crate::components::transform_component::TransformComponent;
 use crate::input_manager::InputManager;
+use crate::renderer::camera_utils;
 use crate::systems::camera_controller_system::{CameraControllerConfig, CameraControllerSystem};
 use anyhow::Result;
 use hmath::vector::{Vector3d, Vector3f};
@@ -82,7 +83,7 @@ impl Engine {
                 let window_size = window.inner_size();
                 let aspect = window_size.width as f32 / window_size.height as f32;
                 
-                let projection = renderer::camera_utils::build_perspective_projection_matrix(
+                let projection = camera_utils::build_perspective_projection_matrix(
                     camera.fov,
                     aspect,
                     camera.near,
@@ -93,7 +94,7 @@ impl Engine {
                 let up = transform.rotation.rotate_vector(&Vector3d::new(0.0, 1.0, 0.0));
                 let target = transform.position + forward;
                 
-                let view = renderer::camera_utils::build_view_matrix(
+                let view = camera_utils::build_view_matrix(
                     transform.position,
                     target,
                     up,
