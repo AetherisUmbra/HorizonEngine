@@ -61,12 +61,23 @@ impl ApplicationHandler for Application {
                     self.engine.draw(Arc::clone(&window));
                 }
             }
-            _ => {}
+            _ => {
+                self.engine.handle_window_event(&event);
+            }
         }
     }
 
+    fn device_event(
+            &mut self,
+            _event_loop: &ActiveEventLoop,
+            _device_id: winit::event::DeviceId,
+            event: winit::event::DeviceEvent,
+        ) {
+        self.engine.handle_device_event(&event);
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        //TODO -> Update engine
+        self.engine.update();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }

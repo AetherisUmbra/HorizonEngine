@@ -1,5 +1,5 @@
 use num_traits::Float;
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, AddAssign, Div, Mul, Sub};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -18,6 +18,10 @@ where
 {
     pub fn new(x: T, y: T, z: T) -> Self {
         Vector3 { x, y, z }
+    }
+
+    pub fn zero() -> Self {
+        Self { x: T::zero(), y: T::zero(), z: T::zero() }
     }
 
     #[inline]
@@ -69,6 +73,15 @@ impl<T: Float> Add for Vector3<T> {
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         Self::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
+    }
+}
+
+impl<T: Float + AddAssign<T>> AddAssign for Vector3<T> {
+    #[inline]
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+        self.z += rhs.z;
     }
 }
 
