@@ -1,7 +1,13 @@
-#[derive(Debug, Clone, Copy, PartialEq)]
+use std::ops::Mul;
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[repr(C)]
 pub struct Matrix4x4 {
     pub data: [f32; 16],
 }
+
+unsafe impl bytemuck::Pod for Matrix4x4 {}
+unsafe impl bytemuck::Zeroable for Matrix4x4 {}
 
 impl Matrix4x4 {
     pub fn new(data: [f32; 16]) -> Self {
@@ -41,8 +47,6 @@ impl Matrix4x4 {
         Matrix4x4 { data: result }
     }
 }
-
-use std::ops::Mul;
 
 impl Mul for Matrix4x4 {
     type Output = Self;

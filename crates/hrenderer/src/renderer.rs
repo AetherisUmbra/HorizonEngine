@@ -1,8 +1,12 @@
 use crate::render_context::RenderContext;
+use crate::uniform::UniformBufferObject;
 use crate::vertex::Vertex;
 use anyhow::Result;
 use hmath::matrix::Matrix4x4;
 use hmath::vector::Vector3;
+use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo};
+use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
+use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
@@ -31,7 +35,7 @@ use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
 use vulkano::pipeline::graphics::GraphicsPipelineCreateInfo;
 use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
 use vulkano::pipeline::{
-    DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo,
+    DynamicState, GraphicsPipeline, Pipeline, PipelineBindPoint, PipelineLayout, PipelineShaderStageCreateInfo
 };
 use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp};
 use vulkano::shader::spirv::bytes_to_words;
@@ -49,10 +53,14 @@ pub struct Renderer {
     device: Arc<Device>,
     queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
     memory_allocator: Arc<StandardMemoryAllocator>,
     vertex_buffer: Subbuffer<[Vertex]>,
     index_buffer: Subbuffer<[u16]>,
     render_context: Option<RenderContext>,
+    uniform_buffer_allocator: Option<SubbufferAllocator>,
+    current_view_matrix: Matrix4x4,
+    current_projection_matrix: Matrix4x4,
 }
 
 fn load_shader(device: Arc<Device>, name: &str) -> Arc<ShaderModule> {
@@ -168,6 +176,11 @@ impl Renderer {
             Default::default(),
         ));
 
+        let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
+            device.clone(),
+            Default::default(),
+        ));
+
         let vertices = [
             // Front face
             Vertex {
@@ -247,10 +260,14 @@ impl Renderer {
             device,
             queue,
             command_buffer_allocator,
+            descriptor_set_allocator,
             memory_allocator,
             vertex_buffer,
             index_buffer,
             render_context: None,
+            uniform_buffer_allocator: None,
+            current_view_matrix: Matrix4x4::identity(),
+            current_projection_matrix: Matrix4x4::identity(),
         })
     }
 
@@ -336,10 +353,12 @@ impl Renderer {
                 PipelineShaderStageCreateInfo::new(fs_entry_point),
             ];
 
+            let descriptor_set_layouts = PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
+                .into_pipeline_layout_create_info(self.device.clone())?;
+            
             let layout = PipelineLayout::new(
                 self.device.clone(),
-                PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
-                    .into_pipeline_layout_create_info(self.device.clone())?,
+                descriptor_set_layouts,
             )?;
 
             let subpass = PipelineRenderingCreateInfo {
@@ -389,6 +408,19 @@ impl Renderer {
             previous_frame_end,
             depth_buffer,
         });
+
+        let uniform_buffer_allocator = SubbufferAllocator::new(
+            self.memory_allocator.clone(),
+            SubbufferAllocatorCreateInfo {
+                buffer_usage: BufferUsage::UNIFORM_BUFFER,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+        );
+        
+        self.uniform_buffer_allocator = Some(uniform_buffer_allocator);
+
         Ok(())
     }
 
@@ -432,6 +464,26 @@ impl Renderer {
             render_context.recreate_swapchain = false;
         }
 
+        let uniform_buffer = if let Some(allocator) = &self.uniform_buffer_allocator {
+            let uniform_data = UniformBufferObject::new(self.current_view_matrix, self.current_projection_matrix);
+            
+            let buffer = allocator.allocate_sized().unwrap();
+            *buffer.write().unwrap() = uniform_data;
+
+            buffer
+        } else {
+            return;
+        };
+        
+        let layout = &render_context.pipeline.layout().set_layouts()[0];
+        let descriptor_set = DescriptorSet::new(
+            self.descriptor_set_allocator.clone(),
+            layout.clone(),
+            [WriteDescriptorSet::buffer(0, uniform_buffer)],
+            [],
+        )
+        .unwrap();
+
         let (image_index, suboptimal, acquire_future) =
             match acquire_next_image(render_context.swapchain.clone(), None)
                 .map_err(Validated::unwrap)
@@ -468,7 +520,7 @@ impl Renderer {
                 depth_attachment: Some(RenderingAttachmentInfo {
                     load_op: AttachmentLoadOp::Clear,
                     store_op: AttachmentStoreOp::DontCare,
-                    clear_value: Some([0.0, 0.0, 0.0, 1.0].into()),
+                    clear_value: Some([1.0, 0.0, 0.0, 0.0].into()),
                     ..RenderingAttachmentInfo::image_view(render_context.depth_buffer.clone())
                 }),
                 ..Default::default()
@@ -477,6 +529,13 @@ impl Renderer {
             .set_viewport(0, [render_context.viewport.clone()].into_iter().collect())
             .unwrap()
             .bind_pipeline_graphics(render_context.pipeline.clone())
+            .unwrap()
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                render_context.pipeline.layout().clone(),
+                0,
+                descriptor_set,
+            )
             .unwrap()
             .bind_vertex_buffers(0, self.vertex_buffer.clone())
             .unwrap()
@@ -520,9 +579,18 @@ impl Renderer {
         }
     }
 
-    pub fn set_projection_matrix(&self, p0: &Matrix4x4) {}
+    pub fn set_view_matrix(&mut self, view: &Matrix4x4) {
+        self.current_view_matrix = *view;
+    }
 
-    pub fn set_view_matrix(&self, v0: &Matrix4x4) {}
+    pub fn set_projection_matrix(&mut self, projection: &Matrix4x4) {
+        self.current_projection_matrix = *projection;
+    }
+
+    pub fn set_camera_matrices(&mut self, view: &Matrix4x4, projection: &Matrix4x4) {
+        self.current_view_matrix = *view;
+        self.current_projection_matrix = *projection;
+    }
 }
 
 fn window_size_dependent_setup(images: &[Arc<Image>]) -> Vec<Arc<ImageView>> {
